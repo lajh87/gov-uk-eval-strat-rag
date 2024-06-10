@@ -12,6 +12,7 @@ from chromadb.utils import embedding_functions
 import tiktoken
 import pandas as pd
 from openai import OpenAI
+from IPython.display import display, Markdown, Latex
 
 openaiclient = OpenAI()
 client = chromadb.PersistentClient(path="inst/chromadb/")
@@ -31,7 +32,7 @@ models = pd.DataFrame([
     {"name": "gpt-4", "tokens": 4096}
     ])
 
-APPROX_CHUNK_SIZE = 400
+APPROX_CHUNK_SIZE = 250
 DEFAULT_MODEL = "gpt-4"
 MODEL_TOKEN_LIMIT = models.query("name == @DEFAULT_MODEL")["tokens"].tolist()[0]
 N_RESERVE_RESPONSE_TOKENS = 500
@@ -92,6 +93,6 @@ response = openaiclient.chat.completions.create(
     temperature= TEMPERATURE,
     stream=False)
     
-response.choices[0].message.content
+Markdown(response.choices[0].message.content)
 
 ```

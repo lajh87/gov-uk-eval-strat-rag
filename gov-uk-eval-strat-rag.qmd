@@ -1,0 +1,97 @@
+---
+title: "Retrieval Augmented Generation over Gov-UK Evaluation Strategies"
+format: html
+editor: visual
+---
+
+```{python}
+import chromadb
+import json 
+import os
+from chromadb.utils import embedding_functions
+import tiktoken
+import pandas as pd
+from openai import OpenAI
+
+openaiclient = OpenAI()
+client = chromadb.PersistentClient(path="inst/chromadb/")
+openai_ef = embedding_functions.OpenAIEmbeddingFunction(
+  api_key=os.getenv("OPENAI_API_KEY"),
+  model_name="text-embedding-ada-002"
+  )
+
+#client.delete_collection(name="eval_strat")
+collection = client.get_or_create_collection(name="eval_strat", embedding_function=openai_ef)
+
+encoding = tiktoken.get_encoding("cl100k_base")
+
+models = pd.DataFrame([
+    {"name": "gpt-3.5-turbo", "tokens": 4096},
+    {"name": "gpt-3.5-turbo-16k", "tokens": 16385},
+    {"name": "gpt-4", "tokens": 4096}
+    ])
+
+APPROX_CHUNK_SIZE = 400
+DEFAULT_MODEL = "gpt-4"
+MODEL_TOKEN_LIMIT = models.query("name == @DEFAULT_MODEL")["tokens"].tolist()[0]
+N_RESERVE_RESPONSE_TOKENS = 500
+MAX_TOKENS = MODEL_TOKEN_LIMIT - N_RESERVE_RESPONSE_TOKENS
+DEFAULT_CHUNKS = round(MODEL_TOKEN_LIMIT/APPROX_CHUNK_SIZE/10)*10
+TEMPERATURE = 0.2
+SYSTEM_PROMPT = """Use the following pieces of context (delimited by three quotes) to answer the question at the end. 
+If you don't know the answer, just say that you don't know, do not try to make up an answer. 
+At the end of your commentary suggest a further question that can be answered by the paragraphs provided."""
+```
+
+# Retrieve
+
+```{python}
+query = "What are the key pillars of the BEIS evaluation strategy?"
+retrieve = collection.query(
+  query_texts = [query], 
+  n_results = 100,
+  where  = {
+    "filename": {
+      "$in": ["beis.md"]
+        }
+      } 
+  )
+documents = retrieve["documents"][0]
+```
+
+# Augment
+
+```{python}
+document_filter = []
+token_count = 0
+for doc in documents:
+    token_count = token_count + len(encoding.encode(doc))
+    if token_count >= MAX_TOKENS:
+        break
+    else:
+        document_filter.append(doc)
+        
+context ='"""'.join(document_filter)
+```
+
+# Generate
+
+```{python}
+messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Question: " + query + 
+             "=======" + 
+             " Context: " + context + 
+             "=======" +
+             "\n Answer:"}
+            ]
+        
+response = openaiclient.chat.completions.create(
+    model=DEFAULT_MODEL,
+    messages = messages,
+    temperature= TEMPERATURE,
+    stream=False)
+    
+response.choices[0].message.content
+
+```
